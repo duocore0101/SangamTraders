@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Menu, Search, ShieldCheck, Database, ShoppingCart, LogOut, ArrowLeftRight } from 'lucide-react';
+import { Menu, Search, ShieldCheck, Database, ShoppingCart, LogOut, ArrowLeftRight, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { storeService } from '@/services/store';
+import { storeService, SyncStatus } from '@/services/store';
 import { isSupabaseConfigured } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -20,9 +20,23 @@ export function Header({ onToggleMobileNav, title }: HeaderProps) {
   const [currentUser] = useState(() => storeService.getCurrentUser());
   const [activeStore, setActiveStore] = useState<StoreAccount>(() => storeService.getActiveStore());
   const [searchQuery, setSearchQuery] = useState('');
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
 
   useEffect(() => {
     setActiveStore(storeService.getActiveStore());
+    const unsubStore = storeService.subscribe(() => {
+      setActiveStore(storeService.getActiveStore());
+    });
+    const unsubSync = storeService.onSyncStatusChange((status, time) => {
+      setSyncStatus(status);
+      if (time) setLastSyncTime(time);
+    });
+
+    return () => {
+      unsubStore();
+      unsubSync();
+    };
   }, []);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -94,15 +108,16 @@ export function Header({ onToggleMobileNav, title }: HeaderProps) {
           <ArrowLeftRight className="w-3 h-3 text-blue-600 group-hover:rotate-180 transition-transform duration-300 shrink-0" />
         </Link>
 
-        {/* Database Status Pill */}
-        <div
-          title={isSupabaseConfigured ? 'Connected to Supabase PostgreSQL' : 'Local Storage Engine (Migrations ready in supabase/migrations/)'}
-          className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border bg-slate-50 text-slate-600 border-slate-200 cursor-help"
+        {/* Database Status & Live Cloud Sync Button */}
+        <button
+          onClick={() => storeService.syncFromSupabase()}
+          title={isSupabaseConfigured ? `Cloud Database: Synced with Supabase. Last: ${lastSyncTime || 'Just now'}. Click to sync.` : 'Running in local mode'}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200 cursor-pointer shadow-2xs transition-colors"
         >
-          <Database className={`w-3.5 h-3.5 ${isSupabaseConfigured ? 'text-emerald-500' : 'text-blue-500'}`} />
-          <span>{isSupabaseConfigured ? 'Supabase' : 'Local Store'}</span>
+          <RefreshCw className={`w-3 h-3 text-emerald-600 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
+          <span className="hidden sm:inline font-semibold">{syncStatus === 'syncing' ? 'Syncing...' : 'Cloud Synced'}</span>
           <span className={`w-2 h-2 rounded-full ${isSupabaseConfigured ? 'bg-emerald-500' : 'bg-blue-500 animate-pulse'}`} />
-        </div>
+        </button>
 
         {/* Quick New Bill Link (Desktop & Tablet only; mobile has central bottom-nav button) */}
         <Link href="/billing/new" className="hidden sm:inline-block">

@@ -51,6 +51,10 @@ export default function InvoicesHistoryPage() {
 
   useEffect(() => {
     loadData();
+    const unsubscribe = storeService.subscribe(() => {
+      loadData();
+    });
+    return unsubscribe;
   }, []);
 
   const filteredInvoices = invoices.filter((inv) => {

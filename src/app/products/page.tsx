@@ -72,6 +72,10 @@ export default function ProductsPage() {
 
   useEffect(() => {
     reload();
+    const unsubscribe = storeService.subscribe(() => {
+      reload();
+    });
+    return unsubscribe;
   }, []);
 
   const filteredProducts = useMemo(() => {

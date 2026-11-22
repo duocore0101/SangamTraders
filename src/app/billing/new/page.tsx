@@ -346,6 +346,10 @@ export default function NewBillPage() {
 
   useEffect(() => {
     reload();
+    const unsubscribe = storeService.subscribe(() => {
+      reload();
+    });
+    return unsubscribe;
   }, []);
 
   const categories = useMemo(() => storeService.getCategories(), []);

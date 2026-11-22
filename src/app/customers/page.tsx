@@ -34,6 +34,10 @@ export default function CustomersPage() {
 
   useEffect(() => {
     loadData();
+    const unsubscribe = storeService.subscribe(() => {
+      loadData();
+    });
+    return unsubscribe;
   }, []);
 
   const filteredCustomers = customers.filter(

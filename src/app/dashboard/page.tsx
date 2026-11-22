@@ -45,6 +45,10 @@ export default function DashboardPage() {
 
   useEffect(() => {
     setStats(storeService.getDashboardStats());
+    const unsubscribe = storeService.subscribe(() => {
+      setStats(storeService.getDashboardStats());
+    });
+    return unsubscribe;
   }, []);
 
   if (!stats) return null;

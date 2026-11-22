@@ -21,12 +21,18 @@ import {
 import { 
   INITIAL_PROFILES, 
   INITIAL_SETTINGS, 
+  INITIAL_SETTINGS_SALES,
+  INITIAL_SETTINGS_TRADERS,
   INITIAL_CATEGORIES, 
   INITIAL_UNITS, 
   INITIAL_PRODUCTS, 
+  INITIAL_PRODUCTS_SALES,
+  INITIAL_PRODUCTS_TRADERS,
   INITIAL_CUSTOMERS, 
   INITIAL_SUPPLIERS, 
   INITIAL_INVOICES, 
+  INITIAL_INVOICES_SALES,
+  INITIAL_INVOICES_TRADERS,
   INITIAL_PURCHASES, 
   INITIAL_PAYMENTS, 
   INITIAL_STOCK_MOVEMENTS 
@@ -34,7 +40,9 @@ import {
 import { getStockStatus } from '@/lib/utils';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase/client';
 
-// Local storage keys
+export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error';
+
+// Local storage prefix
 const STORAGE_PREFIX = 'sangam_sales_';
 
 class StoreService {
@@ -42,100 +50,373 @@ class StoreService {
   private settings: BusinessSettings = { ...INITIAL_SETTINGS };
   private categories: Category[] = [...INITIAL_CATEGORIES];
   private units: Unit[] = [...INITIAL_UNITS];
-  private products: Product[] = [...INITIAL_PRODUCTS];
+  private products: Product[] = [...INITIAL_PRODUCTS_SALES];
   private customers: Customer[] = [...INITIAL_CUSTOMERS];
   private suppliers: Supplier[] = [...INITIAL_SUPPLIERS];
-  private invoices: Invoice[] = [...INITIAL_INVOICES];
+  private invoices: Invoice[] = [...INITIAL_INVOICES_SALES];
   private purchases: Purchase[] = [...INITIAL_PURCHASES];
   private payments: Payment[] = [...INITIAL_PAYMENTS];
   private stockMovements: StockMovement[] = [...INITIAL_STOCK_MOVEMENTS];
   private stockAdjustments: StockAdjustment[] = [];
-  private currentUser: UserProfile = INITIAL_PROFILES[0]; // Admin by default
+  private currentUser: UserProfile = INITIAL_PROFILES[0];
   private activeStoreId: StoreId = 'sangam-sales-automobiles';
   private initialized: boolean = false;
 
+  // Reactivity & Sync Listeners
+  private listeners: Set<() => void> = new Set();
+  private syncListeners: Set<(status: SyncStatus, lastSyncedAt: string | null) => void> = new Set();
+  private currentSyncStatus: SyncStatus = 'idle';
+  private lastSyncedAt: string | null = null;
+  private syncDebounceTimer: NodeJS.Timeout | null = null;
+  private isFetchingFromCloud: boolean = false;
+
   constructor() {
     this.initStore();
+    this.setupAutoSync();
+  }
+
+  // --- Subscriptions for Real-Time UI Updates ---
+  subscribe(fn: () => void): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+
+  onSyncStatusChange(fn: (status: SyncStatus, lastSyncedAt: string | null) => void): () => void {
+    this.syncListeners.add(fn);
+    fn(this.currentSyncStatus, this.lastSyncedAt);
+    return () => this.syncListeners.delete(fn);
+  }
+
+  private notify() {
+    this.listeners.forEach((fn) => {
+      try { fn(); } catch (e) { console.error('Store listener error:', e); }
+    });
+  }
+
+  private notifySyncStatus(status: SyncStatus) {
+    this.currentSyncStatus = status;
+    if (status === 'synced') {
+      this.lastSyncedAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+    this.syncListeners.forEach((fn) => {
+      try { fn(this.currentSyncStatus, this.lastSyncedAt); } catch (e) { console.error('Sync listener error:', e); }
+    });
+  }
+
+  // --- Background Periodic & Visibility Cloud Sync ---
+  private setupAutoSync() {
+    if (typeof window === 'undefined') return;
+
+    window.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        this.syncFromSupabase(this.activeStoreId);
+      }
+    });
+
+    // Auto-poll cloud every 12 seconds
+    setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        this.syncFromSupabase(this.activeStoreId);
+      }
+    }, 12000);
   }
 
   private initStore() {
     if (typeof window === 'undefined') return;
     try {
+      const activeId = localStorage.getItem(STORAGE_PREFIX + 'active_store_id') as StoreId;
+      this.activeStoreId = (activeId === 'sangam-traders' || activeId === 'sangam-sales-automobiles')
+        ? activeId
+        : 'sangam-sales-automobiles';
+
+      // One-time migration for legacy un-scoped data
+      const legacyInvoices = localStorage.getItem(STORAGE_PREFIX + 'invoices');
+      if (legacyInvoices) {
+        try {
+          const parsed = JSON.parse(legacyInvoices);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const hasST = parsed.some((i: Invoice) => i.invoiceNumber?.startsWith('ST-'));
+            const targetStore: StoreId = hasST ? 'sangam-traders' : 'sangam-sales-automobiles';
+            const existingScoped = localStorage.getItem(`${STORAGE_PREFIX}${targetStore}_invoices`);
+            if (!existingScoped) {
+              localStorage.setItem(`${STORAGE_PREFIX}${targetStore}_invoices`, legacyInvoices);
+            }
+          }
+        } catch {}
+      }
+
+      this.loadStoreData(this.activeStoreId);
+      this.initialized = true;
+    } catch (e) {
+      console.error('Failed to init store:', e);
+    }
+  }
+
+  // --- Load Isolated Data for Active Store ---
+  loadStoreData(storeId: StoreId) {
+    this.activeStoreId = storeId;
+    if (typeof window === 'undefined') return;
+
+    try {
+      const activeStore = STORE_ACCOUNTS.find((s) => s.id === storeId) || STORE_ACCOUNTS[0];
+
       const load = <T>(key: string, defaultVal: T): T => {
-        const item = localStorage.getItem(STORAGE_PREFIX + key);
-        return item ? JSON.parse(item) : defaultVal;
+        const item = localStorage.getItem(`${STORAGE_PREFIX}${storeId}_${key}`);
+        if (item) {
+          try { return JSON.parse(item); } catch {}
+        }
+        return defaultVal;
       };
 
-      this.activeStoreId = load('active_store_id', 'sangam-sales-automobiles');
-      const activeStore = STORE_ACCOUNTS.find((s) => s.id === this.activeStoreId) || STORE_ACCOUNTS[0];
+      const defaultProducts = storeId === 'sangam-traders' ? INITIAL_PRODUCTS_TRADERS : INITIAL_PRODUCTS_SALES;
+      const defaultInvoices = storeId === 'sangam-traders' ? INITIAL_INVOICES_TRADERS : INITIAL_INVOICES_SALES;
+      const defaultSettings = storeId === 'sangam-traders' ? INITIAL_SETTINGS_TRADERS : INITIAL_SETTINGS_SALES;
 
-      this.settings = load('settings_' + this.activeStoreId, {
-        ...INITIAL_SETTINGS,
+      this.settings = load('settings', {
+        ...defaultSettings,
         shopName: activeStore.name.toUpperCase(),
         tagline: activeStore.tagline,
         logoUrl: activeStore.logoUrl,
-        address: activeStore.address,
-        phone: activeStore.mobile,
+        address: 'BankarPhata, Otur, Maharashtra',
+        phone: '9766551783',
         email: activeStore.email,
-        gstin: activeStore.gstin,
-        state: activeStore.state,
-        pincode: activeStore.pincode,
+        gstin: '27ANPPG4334F1Z0',
+        state: 'Maharashtra',
+        pincode: '412409',
         invoicePrefix: activeStore.invoicePrefix,
         invoiceFooter: `Thank you for choosing ${activeStore.name}! Please visit again.`,
       });
 
-      // Enforce the official business credentials & address (prevent stale localStorage caches)
-      this.settings.address = 'BankarPhata, Otur, Maharashtra';
-      this.settings.gstin = '27ANPPG4334F1Z0';
-      this.settings.state = 'Maharashtra';
-      this.settings.pincode = '412409';
-      this.settings.phone = '9766551783';
-      this.persist('settings_' + this.activeStoreId, this.settings);
-      this.persist('settings', this.settings);
-
-      // Clean stale store settings caches for all stores
-      ['sangam-sales-automobiles', 'sangam-traders'].forEach((sId) => {
-        const cached = localStorage.getItem(STORAGE_PREFIX + 'settings_' + sId);
-        if (cached) {
-          try {
-            const parsed = JSON.parse(cached);
-            parsed.address = 'BankarPhata, Otur, Maharashtra';
-            parsed.gstin = '27ANPPG4334F1Z0';
-            parsed.state = 'Maharashtra';
-            parsed.pincode = '412409';
-            parsed.phone = '9766551783';
-            localStorage.setItem(STORAGE_PREFIX + 'settings_' + sId, JSON.stringify(parsed));
-          } catch {}
-        }
-      });
       this.categories = load('categories', INITIAL_CATEGORIES);
       this.units = load('units', INITIAL_UNITS);
-      this.products = load('products', INITIAL_PRODUCTS);
+      this.products = load('products', defaultProducts);
       this.customers = load('customers', INITIAL_CUSTOMERS);
       this.suppliers = load('suppliers', INITIAL_SUPPLIERS);
-      this.invoices = load('invoices', INITIAL_INVOICES);
+      this.invoices = load('invoices', defaultInvoices);
       this.purchases = load('purchases', INITIAL_PURCHASES);
       this.payments = load('payments', INITIAL_PAYMENTS);
       this.stockMovements = load('movements', INITIAL_STOCK_MOVEMENTS);
       this.stockAdjustments = load('adjustments', []);
-      this.currentUser = load('user', {
+      this.currentUser = {
         ...INITIAL_PROFILES[0],
         fullName: 'MR. Rajendra Gaikwad (Owner / Admin)',
         phone: activeStore.mobile,
         email: activeStore.email,
-      });
-      this.initialized = true;
-    } catch {
-      // Fallback to in-memory initial data
+      };
+
+      this.persistLocal(storeId);
+      this.notify();
+
+      // Trigger cloud sync for this store
+      this.syncFromSupabase(storeId);
+    } catch (e) {
+      console.error('Error loading store data:', e);
     }
+  }
+
+  private persistLocal(storeId: StoreId = this.activeStoreId) {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem(`${STORAGE_PREFIX}${storeId}_settings`, JSON.stringify(this.settings));
+      localStorage.setItem(`${STORAGE_PREFIX}${storeId}_categories`, JSON.stringify(this.categories));
+      localStorage.setItem(`${STORAGE_PREFIX}${storeId}_units`, JSON.stringify(this.units));
+      localStorage.setItem(`${STORAGE_PREFIX}${storeId}_products`, JSON.stringify(this.products));
+      localStorage.setItem(`${STORAGE_PREFIX}${storeId}_customers`, JSON.stringify(this.customers));
+      localStorage.setItem(`${STORAGE_PREFIX}${storeId}_suppliers`, JSON.stringify(this.suppliers));
+      localStorage.setItem(`${STORAGE_PREFIX}${storeId}_invoices`, JSON.stringify(this.invoices));
+      localStorage.setItem(`${STORAGE_PREFIX}${storeId}_purchases`, JSON.stringify(this.purchases));
+      localStorage.setItem(`${STORAGE_PREFIX}${storeId}_payments`, JSON.stringify(this.payments));
+      localStorage.setItem(`${STORAGE_PREFIX}${storeId}_movements`, JSON.stringify(this.stockMovements));
+      localStorage.setItem(`${STORAGE_PREFIX}${storeId}_adjustments`, JSON.stringify(this.stockAdjustments));
+    } catch {}
   }
 
   private persist(key: string, data: unknown) {
     if (typeof window === 'undefined') return;
     try {
-      localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(data));
-    } catch {
-      // Storage quota or private mode fallback
+      localStorage.setItem(`${STORAGE_PREFIX}${this.activeStoreId}_${key}`, JSON.stringify(data));
+      localStorage.setItem(`${STORAGE_PREFIX}${key}`, JSON.stringify(data));
+    } catch {}
+
+    this.notify();
+    this.triggerCloudSync(this.activeStoreId);
+  }
+
+  triggerCloudSync(storeId: StoreId = this.activeStoreId) {
+    if (typeof window === 'undefined' || !isSupabaseConfigured || !supabase) return;
+    if (this.syncDebounceTimer) clearTimeout(this.syncDebounceTimer);
+    this.syncDebounceTimer = setTimeout(() => {
+      this.syncToSupabase(storeId);
+    }, 400);
+  }
+
+  // --- Push Snapshot to Supabase Cloud ---
+  async syncToSupabase(storeId: StoreId = this.activeStoreId): Promise<boolean> {
+    if (typeof window === 'undefined' || !isSupabaseConfigured || !supabase) return false;
+    this.notifySyncStatus('syncing');
+
+    try {
+      const now = new Date().toISOString();
+      const snapshot = {
+        storeId,
+        settings: this.settings,
+        products: this.products,
+        invoices: this.invoices,
+        customers: this.customers,
+        suppliers: this.suppliers,
+        categories: this.categories,
+        units: this.units,
+        purchases: this.purchases,
+        payments: this.payments,
+        stockMovements: this.stockMovements,
+        stockAdjustments: this.stockAdjustments,
+        updatedAt: now,
+      };
+
+      const { data: existing } = await supabase
+        .from('audit_logs')
+        .select('id')
+        .eq('entity', 'store_sync')
+        .eq('action', storeId)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        await supabase
+          .from('audit_logs')
+          .update({
+            details: snapshot,
+          })
+          .eq('id', existing[0].id);
+      } else {
+        await supabase
+          .from('audit_logs')
+          .insert({
+            entity: 'store_sync',
+            action: storeId,
+            details: snapshot,
+          });
+      }
+
+      localStorage.setItem(`${STORAGE_PREFIX}${storeId}_last_cloud_sync`, now);
+      this.notifySyncStatus('synced');
+      return true;
+    } catch (err) {
+      console.error('Failed to sync to Supabase:', err);
+      this.notifySyncStatus('error');
+      return false;
+    }
+  }
+
+  // --- Pull Snapshot from Supabase Cloud ---
+  async syncFromSupabase(storeId: StoreId = this.activeStoreId): Promise<boolean> {
+    if (typeof window === 'undefined' || !isSupabaseConfigured || !supabase) return false;
+    if (this.isFetchingFromCloud) return false;
+    this.isFetchingFromCloud = true;
+    this.notifySyncStatus('syncing');
+
+    try {
+      const { data, error } = await supabase
+        .from('audit_logs')
+        .select('id, details, created_at')
+        .eq('entity', 'store_sync')
+        .eq('action', storeId)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (error) {
+        console.warn('Supabase fetch error:', error.message);
+        this.notifySyncStatus('error');
+        return false;
+      }
+
+      if (data && data.length > 0 && data[0].details) {
+        const remote = data[0].details as any;
+
+        // Merge invoices by unique invoiceNumber to preserve bills across devices
+        if (remote.invoices && Array.isArray(remote.invoices)) {
+          const invMap = new Map<string, Invoice>();
+          remote.invoices.forEach((inv: Invoice) => invMap.set(inv.invoiceNumber, inv));
+          this.invoices.forEach((inv: Invoice) => {
+            if (!invMap.has(inv.invoiceNumber)) {
+              invMap.set(inv.invoiceNumber, inv);
+            }
+          });
+          this.invoices = Array.from(invMap.values()).sort(
+            (a, b) => new Date(b.createdAt || b.invoiceDate).getTime() - new Date(a.createdAt || a.invoiceDate).getTime()
+          );
+        }
+
+        // Merge products by SKU
+        if (remote.products && Array.isArray(remote.products)) {
+          const prodMap = new Map<string, Product>();
+          remote.products.forEach((p: Product) => prodMap.set(p.sku, p));
+          this.products.forEach((p: Product) => {
+            if (!prodMap.has(p.sku)) {
+              prodMap.set(p.sku, p);
+            }
+          });
+          this.products = Array.from(prodMap.values());
+        }
+
+        // Merge customers by mobile
+        if (remote.customers && Array.isArray(remote.customers)) {
+          const custMap = new Map<string, Customer>();
+          remote.customers.forEach((c: Customer) => custMap.set(c.mobile, c));
+          this.customers.forEach((c: Customer) => {
+            if (!custMap.has(c.mobile)) {
+              custMap.set(c.mobile, c);
+            }
+          });
+          this.customers = Array.from(custMap.values());
+        }
+
+        if (remote.suppliers && Array.isArray(remote.suppliers)) {
+          this.suppliers = remote.suppliers;
+        }
+        if (remote.categories && Array.isArray(remote.categories)) {
+          this.categories = remote.categories;
+        }
+        if (remote.units && Array.isArray(remote.units)) {
+          this.units = remote.units;
+        }
+        if (remote.payments && Array.isArray(remote.payments)) {
+          this.payments = remote.payments;
+        }
+        if (remote.stockMovements && Array.isArray(remote.stockMovements)) {
+          this.stockMovements = remote.stockMovements;
+        }
+        if (remote.stockAdjustments && Array.isArray(remote.stockAdjustments)) {
+          this.stockAdjustments = remote.stockAdjustments;
+        }
+        if (remote.settings && typeof remote.settings === 'object') {
+          this.settings = {
+            ...this.settings,
+            ...remote.settings,
+            address: 'BankarPhata, Otur, Maharashtra',
+            gstin: '27ANPPG4334F1Z0',
+            state: 'Maharashtra',
+            pincode: '412409',
+            phone: '9766551783',
+          };
+        }
+
+        this.persistLocal(storeId);
+        this.notify();
+        this.notifySyncStatus('synced');
+        return true;
+      } else {
+        // Upload initial store data to Supabase
+        await this.syncToSupabase(storeId);
+        this.notifySyncStatus('synced');
+        return true;
+      }
+    } catch (err) {
+      console.error('Failed to sync from Supabase:', err);
+      this.notifySyncStatus('error');
+      return false;
+    } finally {
+      this.isFetchingFromCloud = false;
     }
   }
 
@@ -153,37 +434,9 @@ class StoreService {
     if (!store) throw new Error('Invalid store account');
 
     this.activeStoreId = storeId;
-    this.persist('active_store_id', storeId);
-
-    // Apply store business settings
-    this.settings = {
-      ...this.settings,
-      shopName: store.name.toUpperCase(),
-      tagline: store.tagline,
-      logoUrl: store.logoUrl,
-      address: store.address,
-      phone: store.mobile,
-      email: store.email,
-      gstin: store.gstin,
-      state: store.state,
-      invoicePrefix: store.invoicePrefix,
-      invoiceFooter: `Thank you for choosing ${store.name}! Please visit again.`,
-    };
-    this.persist('settings_' + storeId, this.settings);
-    this.persist('settings', this.settings);
-
-    // Update current active admin user (MR. Rajendra Gaikwad)
-    this.currentUser = {
-      ...this.currentUser,
-      fullName: 'MR. Rajendra Gaikwad (Owner / Admin)',
-      phone: store.mobile,
-      email: store.email,
-    };
-    this.persist('user', this.currentUser);
-
-    // Record session
     if (typeof window !== 'undefined') {
       try {
+        localStorage.setItem(STORAGE_PREFIX + 'active_store_id', storeId);
         localStorage.setItem(STORAGE_PREFIX + 'session', JSON.stringify({
           storeId,
           storeName: store.name,
@@ -193,6 +446,7 @@ class StoreService {
       } catch {}
     }
 
+    this.loadStoreData(storeId);
     return store;
   }
 
