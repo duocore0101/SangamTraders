@@ -14,7 +14,7 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   title: "Sangam Sales and Automobiles & Sangam Traders – Management System",
   description: "Hardware, Automobile Spares & Building Materials Billing, Inventory, and Accounting System by Duocore Software",
-  manifest: "/manifest.webmanifest",
+  manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
@@ -39,6 +39,40 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full">
+      <head>
+        <link rel="manifest" href="/manifest.json" />
+        <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content="Sangam POS" />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                // Immediate Service Worker Registration
+                if ('serviceWorker' in navigator) {
+                  navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function(e) {});
+                }
+                // Early capture of beforeinstallprompt before React hydration
+                window.__pwaDeferredPrompt = null;
+                window.addEventListener('beforeinstallprompt', function(e) {
+                  e.preventDefault();
+                  window.__pwaDeferredPrompt = e;
+                  window.dispatchEvent(new CustomEvent('pwa-prompt-ready'));
+                });
+                window.addEventListener('appinstalled', function() {
+                  window.__pwaDeferredPrompt = null;
+                  try {
+                    localStorage.setItem('sangam_pwa_installed', 'true');
+                  } catch(e) {}
+                  window.dispatchEvent(new CustomEvent('pwa-app-installed'));
+                });
+              })();
+            `,
+          }}
+        />
+      </head>
       <body className="min-h-full flex flex-col bg-slate-50 text-slate-900 font-sans antialiased selection:bg-blue-100 selection:text-blue-900">
         {children}
         <PwaInstallPrompt />

@@ -1,28 +1,27 @@
 // Sangam Enterprises PWA Service Worker
-const CACHE_NAME = 'sangam-pos-v1';
-const STATIC_ASSETS = [
+const CACHE_NAME = 'sangam-pos-v2';
+
+const PRECACHE_URLS = [
   '/',
   '/manifest.json',
   '/icons/icon-192x192.png',
   '/icons/icon-512x512.png',
-  '/icons/apple-touch-icon.png',
-  '/images/sangam_sales_automobiles_logo_v2.png',
-  '/images/sangam_traders_logo_v2.png'
+  '/icons/icon-maskable-192x192.png',
+  '/icons/icon-maskable-512x512.png',
+  '/icons/apple-touch-icon.png'
 ];
 
-// Install Event - Pre-cache core assets
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS).catch((err) => {
-        console.warn('[PWA SW] Pre-cache non-critical error:', err);
+      return cache.addAll(PRECACHE_URLS).catch((err) => {
+        console.log('[PWA SW] Non-blocking precache note:', err);
       });
     })
   );
   self.skipWaiting();
 });
 
-// Activate Event - Clean up old caches & take immediate control
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
@@ -37,55 +36,42 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch Event - Network First strategy with Cache Fallback for navigation and assets
 self.addEventListener('fetch', (event) => {
-  // Only handle GET requests
   if (event.request.method !== 'GET') return;
-
   const url = new URL(event.request.url);
 
-  // Skip Supabase API, external URLs, and Next.js dev hot-reload
-  if (url.origin !== self.location.origin) return;
-  if (url.pathname.startsWith('/api/') || url.pathname.includes('/_next/webpack-hmr')) return;
+  // Skip API routes and Supabase requests
+  if (url.origin !== self.location.origin || url.pathname.startsWith('/api/')) {
+    return;
+  }
 
-  // For HTML navigations and static files, use Network First, fallback to cache
+  // Network First, cache fallback
   event.respondWith(
     fetch(event.request)
-      .then((networkResponse) => {
-        if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
-          const responseToCache = networkResponse.clone();
+      .then((response) => {
+        if (response && response.status === 200) {
+          const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => {
-            // Cache images, styles, and scripts
             if (
               url.pathname.startsWith('/icons/') ||
               url.pathname.startsWith('/images/') ||
               url.pathname.endsWith('.png') ||
-              url.pathname.endsWith('.svg') ||
-              url.pathname.endsWith('.css') ||
-              url.pathname.endsWith('.js')
+              url.pathname.endsWith('.svg')
             ) {
-              cache.put(event.request, responseToCache);
+              cache.put(event.request, clone);
             }
           });
         }
-        return networkResponse;
+        return response;
       })
       .catch(async () => {
-        // Fallback to cache if network is offline
-        const cachedResponse = await caches.match(event.request);
-        if (cachedResponse) return cachedResponse;
-
-        // If navigating to an HTML page while offline, return the root page
+        const cached = await caches.match(event.request);
+        if (cached) return cached;
         if (event.request.mode === 'navigate') {
-          const fallback = await caches.match('/');
-          if (fallback) return fallback;
+          const rootFallback = await caches.match('/');
+          if (rootFallback) return rootFallback;
         }
-
-        return new Response('Network error occurred. App is currently offline.', {
-          status: 503,
-          statusText: 'Service Unavailable',
-          headers: new Headers({ 'Content-Type': 'text/plain' }),
-        });
+        return new Response('Offline', { status: 503, statusText: 'Service Unavailable' });
       })
   );
 });
