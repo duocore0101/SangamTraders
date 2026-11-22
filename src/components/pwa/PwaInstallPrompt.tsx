@@ -12,8 +12,8 @@ import {
   CheckCircle2, 
   Share2, 
   PlusSquare,
-  Compass,
-  ArrowRight
+  ArrowDown,
+  Laptop
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -25,47 +25,34 @@ interface BeforeInstallPromptEvent extends Event {
 export default function PwaInstallPrompt() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showPrompt, setShowPrompt] = useState(false);
-  const [isStandalone, setIsStandalone] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
+  const [showIOSArrow, setShowIOSArrow] = useState(false);
 
   // Platform detection
-  const [isIPhone, setIsIPhone] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
   const [isMac, setIsMac] = useState(false);
-  const [isMacSafari, setIsMacSafari] = useState(false);
 
   useEffect(() => {
-    // 1. Detect if running as installed standalone app (iOS home screen or Desktop PWA)
-    const checkIsStandalone = () => {
-      const isRunningStandalone = 
-        window.matchMedia('(display-mode: standalone)').matches ||
-        (window.navigator as unknown as { standalone?: boolean }).standalone === true ||
-        document.referrer.includes('android-app://');
+    // Check standalone mode (running as installed PWA)
+    const isStandalone = 
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as unknown as { standalone?: boolean }).standalone === true ||
+      document.referrer.includes('android-app://');
 
-      const isStoredInstalled = localStorage.getItem('sangam_pwa_installed') === 'true';
+    // Detect platform
+    const ua = window.navigator.userAgent.toLowerCase();
+    const isAppleMobile = /iphone|ipad|ipod/.test(ua) && !(window as unknown as { MSStream?: boolean }).MSStream;
+    const isAppleMac = /macintosh|mac os x/.test(ua) && !isAppleMobile;
 
-      if (isRunningStandalone || isStoredInstalled) {
-        setIsStandalone(true);
-        setShowPrompt(false);
-        return true;
-      }
-      return false;
-    };
+    setIsIOS(isAppleMobile);
+    setIsMac(isAppleMac);
 
-    if (checkIsStandalone()) {
+    // If running in standalone mode (already installed & opened from home screen/dock), do not auto-popup
+    if (isStandalone) {
       return;
     }
 
-    // 2. Detect platform & browser
-    const userAgent = window.navigator.userAgent.toLowerCase();
-    const isIOSDevice = /iphone|ipad|ipod/.test(userAgent) && !(window as unknown as { MSStream?: boolean }).MSStream;
-    const isMacDevice = /macintosh|mac os x/.test(userAgent) && !isIOSDevice;
-    const isSafari = /safari/.test(userAgent) && !/chrome|crios|crmo|edg|android/.test(userAgent);
-
-    setIsIPhone(isIOSDevice);
-    setIsMac(isMacDevice);
-    setIsMacSafari(isMacDevice && isSafari);
-
-    // 3. Early captured prompt from window.__pwaDeferredPrompt (Chromium: Windows, Android, Chrome on Mac)
+    // Capture early beforeinstallprompt from window.__pwaDeferredPrompt
     const win = window as unknown as { 
       __pwaDeferredPrompt?: BeforeInstallPromptEvent | null;
     };
@@ -77,15 +64,15 @@ export default function PwaInstallPrompt() {
     const handlePromptReady = (e?: Event) => {
       if (e && 'prompt' in e) {
         e.preventDefault();
-        const promptEvent = e as BeforeInstallPromptEvent;
-        setDeferredPrompt(promptEvent);
-        win.__pwaDeferredPrompt = promptEvent;
+        const pe = e as BeforeInstallPromptEvent;
+        setDeferredPrompt(pe);
+        win.__pwaDeferredPrompt = pe;
       } else if (win.__pwaDeferredPrompt) {
         setDeferredPrompt(win.__pwaDeferredPrompt);
       }
       
-      const dismissedThisSession = sessionStorage.getItem('sangam_pwa_dismissed') === 'true';
-      if (!dismissedThisSession && !checkIsStandalone()) {
+      const dismissed = sessionStorage.getItem('sangam_pwa_dismissed') === 'true';
+      if (!dismissed) {
         setShowPrompt(true);
       }
     };
@@ -93,10 +80,9 @@ export default function PwaInstallPrompt() {
     window.addEventListener('beforeinstallprompt', handlePromptReady);
     window.addEventListener('pwa-prompt-ready', handlePromptReady);
 
-    // 4. App installed event
+    // App installed event
     const handleAppInstalled = () => {
       localStorage.setItem('sangam_pwa_installed', 'true');
-      setIsStandalone(true);
       setShowPrompt(false);
       setDeferredPrompt(null);
       win.__pwaDeferredPrompt = null;
@@ -106,26 +92,18 @@ export default function PwaInstallPrompt() {
     window.addEventListener('appinstalled', handleAppInstalled);
     window.addEventListener('pwa-app-installed', handleAppInstalled);
 
-    // 5. Header manual open trigger
+    // Manual open event from "Install App" button in header
     const handleManualOpen = () => {
       setShowPrompt(true);
+      setShowIOSArrow(false);
     };
     window.addEventListener('open-pwa-install', handleManualOpen);
 
-    // 6. Display mode change
-    const mediaQueryList = window.matchMedia('(display-mode: standalone)');
-    const handleDisplayChange = (e: MediaQueryListEvent) => {
-      if (e.matches) {
-        setIsStandalone(true);
-        setShowPrompt(false);
-      }
-    };
-    mediaQueryList.addEventListener('change', handleDisplayChange);
-
-    // Show popup after brief delay
+    // Auto-show popup after 800ms unless dismissed in this session
     const timer = setTimeout(() => {
-      const dismissedThisSession = sessionStorage.getItem('sangam_pwa_dismissed') === 'true';
-      if (!checkIsStandalone() && !dismissedThisSession) {
+      const dismissed = sessionStorage.getItem('sangam_pwa_dismissed') === 'true';
+      const installed = localStorage.getItem('sangam_pwa_installed') === 'true';
+      if (!dismissed && !installed) {
         setShowPrompt(true);
       }
     }, 800);
@@ -136,18 +114,18 @@ export default function PwaInstallPrompt() {
       window.removeEventListener('appinstalled', handleAppInstalled);
       window.removeEventListener('pwa-app-installed', handleAppInstalled);
       window.removeEventListener('open-pwa-install', handleManualOpen);
-      mediaQueryList.removeEventListener('change', handleDisplayChange);
       clearTimeout(timer);
     };
   }, []);
 
-  // Windows / Android / Chrome 1-click install action
+  // Primary action: Download / Install
   const handleInstallClick = async () => {
     const win = window as unknown as { 
       __pwaDeferredPrompt?: BeforeInstallPromptEvent | null;
     };
     const activePrompt = deferredPrompt || win.__pwaDeferredPrompt;
 
+    // 1. If native Chromium install prompt is ready (Windows Chrome/Edge, Android, Mac Chrome)
     if (activePrompt) {
       try {
         setIsInstalling(true);
@@ -161,28 +139,85 @@ export default function PwaInstallPrompt() {
           toast.success('Installing Sangam POS app...');
         }
       } catch (err) {
-        console.error('[PWA] Install error:', err);
+        console.error('[PWA] prompt error:', err);
       } finally {
         setIsInstalling(false);
       }
-    } else {
-      toast.info('Follow the on-screen steps to add Sangam POS to your home screen or dock.');
+      return;
+    }
+
+    // 2. If on iPhone / iPad (iOS): Apple requires Safari Share Sheet
+    if (isIOS) {
+      setShowIOSArrow(true);
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate([100, 50, 100]);
+      }
+      toast.info('Tap the Share button at the bottom of Safari, then choose "Add to Home Screen".');
+      return;
+    }
+
+    // 3. If on Mac (Safari or desktop where prompt is unavailable):
+    // Directly download the Mac Desktop App Launcher (.webloc)
+    if (isMac) {
+      try {
+        const origin = window.location.origin;
+        const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>URL</key>
+    <string>${origin}</string>
+</dict>
+</plist>`;
+        const blob = new Blob([xml], { type: 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'Sangam-POS.webloc';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        toast.success('Downloaded Mac Desktop App Launcher! In Safari top menu, you can also click File > Add to Dock.');
+      } catch (e) {
+        console.error(e);
+      }
+      return;
+    }
+
+    // 4. Windows / Other PC fallback: download Windows Internet Shortcut (.url)
+    try {
+      const origin = window.location.origin;
+      const ini = `[InternetShortcut]\r\nURL=${origin}\r\nIconIndex=0\r\n`;
+      const blob = new Blob([ini], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'Sangam-POS.url';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success('Downloaded Windows Desktop Shortcut! Move to your desktop to launch.');
+    } catch (e) {
+      console.error(e);
     }
   };
 
   const handleMarkInstalled = () => {
     localStorage.setItem('sangam_pwa_installed', 'true');
-    setIsStandalone(true);
     setShowPrompt(false);
+    setShowIOSArrow(false);
     toast.success('Saved! This popup will no longer appear.');
   };
 
   const handleDismissForSession = () => {
     sessionStorage.setItem('sangam_pwa_dismissed', 'true');
     setShowPrompt(false);
+    setShowIOSArrow(false);
   };
 
-  if (isStandalone || !showPrompt) {
+  if (!showPrompt) {
     return null;
   }
 
@@ -193,19 +228,19 @@ export default function PwaInstallPrompt() {
         role="dialog"
         aria-modal="true"
       >
-        {/* Ambient Top Glow */}
+        {/* Ambient Glow */}
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-64 h-20 bg-gradient-to-r from-blue-600/30 via-emerald-500/30 to-teal-500/30 blur-2xl pointer-events-none" />
 
-        {/* Close button for current session */}
+        {/* Close Button */}
         <button
           onClick={handleDismissForSession}
           className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-full bg-slate-800/60 hover:bg-slate-700/80 transition-colors z-20 cursor-pointer"
-          title="Close (will show again next time until installed)"
+          title="Close"
         >
           <X className="w-5 h-5" />
         </button>
 
-        {/* App Logo & Title */}
+        {/* App Title & Icon */}
         <div className="flex items-center gap-3.5 z-10 relative">
           <div className="relative w-16 h-16 rounded-2xl bg-gradient-to-br from-slate-800 to-slate-950 p-1 border-2 border-amber-400/60 shadow-lg shadow-amber-500/10 shrink-0 flex items-center justify-center">
             <Image
@@ -227,7 +262,7 @@ export default function PwaInstallPrompt() {
               <span>Official App</span>
             </div>
             <h3 className="text-lg font-black text-white tracking-tight leading-tight">
-              {isIPhone ? 'Install on iPhone' : isMac ? 'Install on Mac' : 'Download Sangam POS'}
+              {isIOS ? 'Install on iPhone' : isMac ? 'Download Mac App' : 'Download Sangam POS'}
             </h3>
             <p className="text-xs text-slate-300">
               Fast counter billing & one-tap launch on your device.
@@ -235,79 +270,56 @@ export default function PwaInstallPrompt() {
           </div>
         </div>
 
-        {/* CASE 1: IPHONE / IPAD (Apple requires native Share -> Add to Home Screen) */}
-        {isIPhone && (
-          <div className="mt-4 p-4 rounded-2xl bg-blue-950/50 border border-blue-500/40 text-xs text-slate-200 space-y-3 animate-in fade-in duration-200">
+        {/* iPhone / iPad Step-by-Step Instructions */}
+        {isIOS && (
+          <div className="mt-4 p-4 rounded-2xl bg-blue-950/60 border border-blue-500/50 text-xs text-slate-200 space-y-3 animate-in fade-in duration-200">
             <div className="font-bold text-blue-300 flex items-center gap-2 text-sm">
               <Smartphone className="w-4 h-4 text-blue-400 shrink-0" />
-              <span>How to Install on iPhone Safari:</span>
+              <span>How to Install on iPhone:</span>
             </div>
             
-            <div className="space-y-2 text-slate-300 text-xs">
+            <div className="space-y-2.5 text-slate-200 text-xs">
               <div className="flex items-start gap-2.5">
-                <span className="w-5 h-5 rounded-full bg-blue-600/30 border border-blue-400/40 text-blue-300 text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">1</span>
-                <span>Tap the <strong className="text-white">Share</strong> button <Share2 className="w-3.5 h-3.5 inline text-blue-400 mx-0.5" /> at the bottom bar of Safari.</span>
+                <span className="w-5 h-5 rounded-full bg-blue-600/40 border border-blue-400 text-blue-300 text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">1</span>
+                <span>Tap the <strong className="text-white">Share</strong> button <Share2 className="w-3.5 h-3.5 inline text-blue-400 mx-0.5" /> at the bottom of Safari.</span>
               </div>
               <div className="flex items-start gap-2.5">
-                <span className="w-5 h-5 rounded-full bg-blue-600/30 border border-blue-400/40 text-blue-300 text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">2</span>
+                <span className="w-5 h-5 rounded-full bg-blue-600/40 border border-blue-400 text-blue-300 text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">2</span>
                 <span>Scroll down and tap <strong className="text-emerald-400">&ldquo;Add to Home Screen&rdquo;</strong> <PlusSquare className="w-3.5 h-3.5 inline text-emerald-400 mx-0.5" />.</span>
               </div>
               <div className="flex items-start gap-2.5">
-                <span className="w-5 h-5 rounded-full bg-blue-600/30 border border-blue-400/40 text-blue-300 text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">3</span>
+                <span className="w-5 h-5 rounded-full bg-blue-600/40 border border-blue-400 text-blue-300 text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">3</span>
                 <span>Tap <strong className="text-white">&ldquo;Add&rdquo;</strong> in the top-right corner.</span>
               </div>
             </div>
 
-            <button
-              onClick={handleMarkInstalled}
-              className="w-full mt-2 py-2.5 px-3 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer"
-            >
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>I&apos;ve Added It to My iPhone</span>
-            </button>
-          </div>
-        )}
-
-        {/* CASE 2: MAC LAPTOP / DESKTOP */}
-        {isMac && (
-          <div className="mt-4 p-4 rounded-2xl bg-blue-950/50 border border-blue-500/40 text-xs text-slate-200 space-y-3 animate-in fade-in duration-200">
-            <div className="font-bold text-blue-300 flex items-center gap-2 text-sm">
-              <Monitor className="w-4 h-4 text-blue-400 shrink-0" />
-              <span>How to Install on Mac:</span>
-            </div>
-
-            {isMacSafari ? (
-              <div className="space-y-2 text-slate-300 text-xs">
-                <div className="flex items-start gap-2.5">
-                  <span className="w-5 h-5 rounded-full bg-blue-600/30 border border-blue-400/40 text-blue-300 text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">1</span>
-                  <span>In Safari top menu: Click <strong className="text-white">File</strong> $\rightarrow$ <strong className="text-emerald-400">&ldquo;Add to Dock...&rdquo;</strong></span>
-                </div>
-                <div className="flex items-start gap-2.5">
-                  <span className="w-5 h-5 rounded-full bg-blue-600/30 border border-blue-400/40 text-blue-300 text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">2</span>
-                  <span>Click <strong className="text-white">&ldquo;Add&rdquo;</strong> — Sangam POS is now an app in your Mac Dock!</span>
-                </div>
-                <div className="text-[11px] text-slate-400 pt-1">
-                  💡 Tip: You can also open this link in <strong className="text-white">Google Chrome on your Mac</strong> to install with 1-click just like Windows!
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-2 text-slate-300 text-xs">
-                <p>Click <strong className="text-emerald-400">&ldquo;Download / Install App&rdquo;</strong> below, or click the Install icon (⊕) in your Chrome/Edge address bar at the top right.</p>
+            {showIOSArrow && (
+              <div className="p-2.5 rounded-xl bg-amber-500/20 border border-amber-400/50 text-amber-200 text-xs flex items-center gap-2 animate-bounce">
+                <ArrowDown className="w-4 h-4 shrink-0 text-amber-300" />
+                <span>Look at the bottom toolbar of Safari and tap the Share button!</span>
               </div>
             )}
-
-            <button
-              onClick={handleMarkInstalled}
-              className="w-full mt-2 py-2.5 px-3 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer"
-            >
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>I&apos;ve Added It to My Mac</span>
-            </button>
           </div>
         )}
 
-        {/* CASE 3: WINDOWS / ANDROID (1-Click Install Supported) */}
-        {!isIPhone && !isMac && (
+        {/* Mac Instructions */}
+        {isMac && (
+          <div className="mt-4 p-4 rounded-2xl bg-blue-950/60 border border-blue-500/50 text-xs text-slate-200 space-y-2.5 animate-in fade-in duration-200">
+            <div className="font-bold text-blue-300 flex items-center gap-2 text-sm">
+              <Laptop className="w-4 h-4 text-blue-400 shrink-0" />
+              <span>Install on Mac:</span>
+            </div>
+            <p className="text-xs text-slate-200 leading-relaxed">
+              Click <strong className="text-emerald-400">&ldquo;Download Mac App Launcher&rdquo;</strong> below to download the shortcut directly to your Mac, or in Safari top menu click <strong className="text-white">File &gt; Add to Dock...</strong>.
+            </p>
+            <p className="text-[11px] text-slate-400">
+              💡 Tip: In Google Chrome on Mac, you can also install directly via the Install icon (⊕) in the address bar!
+            </p>
+          </div>
+        )}
+
+        {/* Features Row for Windows/Android */}
+        {!isIOS && !isMac && (
           <div className="mt-4 grid grid-cols-3 gap-2 py-2.5 px-3 rounded-2xl bg-slate-900/80 border border-slate-800/80 text-center">
             <div className="flex flex-col items-center gap-0.5">
               <Zap className="w-4 h-4 text-blue-400" />
@@ -329,25 +341,38 @@ export default function PwaInstallPrompt() {
           </div>
         )}
 
-        {/* Action Buttons for non-iPhone (or Chrome on Mac) */}
-        {!isIPhone && (!isMac || !isMacSafari) && (
-          <div className="mt-4 flex flex-col gap-2 z-10 relative">
-            <button
-              onClick={handleInstallClick}
-              disabled={isInstalling}
-              className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-emerald-600 to-teal-500 hover:from-blue-500 hover:to-emerald-500 text-white font-bold text-sm shadow-lg shadow-blue-600/30 transition-all transform active:scale-95 disabled:opacity-50 cursor-pointer"
-            >
-              <Download className="w-4 h-4 animate-bounce" />
-              <span>{isInstalling ? 'Opening Installer...' : 'Download / Install App'}</span>
-            </button>
-          </div>
-        )}
+        {/* Action Buttons */}
+        <div className="mt-4 flex flex-col gap-2 z-10 relative">
+          <button
+            onClick={handleInstallClick}
+            disabled={isInstalling}
+            className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-emerald-600 to-teal-500 hover:from-blue-500 hover:to-emerald-500 text-white font-bold text-sm shadow-lg shadow-blue-600/30 transition-all transform active:scale-95 disabled:opacity-50 cursor-pointer"
+          >
+            <Download className="w-4 h-4 animate-bounce" />
+            <span>
+              {isInstalling 
+                ? 'Opening Installer...' 
+                : isIOS 
+                ? 'Show iPhone Install Steps' 
+                : isMac 
+                ? 'Download Mac App Launcher' 
+                : 'Download / Install App'}
+            </span>
+          </button>
 
-        {/* Dismiss Button */}
-        <div className="mt-2.5">
+          {/* Confirmation button to dismiss popup permanently */}
+          <button
+            onClick={handleMarkInstalled}
+            className="w-full py-2.5 px-3 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+            title="Mark as installed on this device"
+          >
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            <span>I&apos;ve Added It to My Device (Don&apos;t show again)</span>
+          </button>
+
           <button
             onClick={handleDismissForSession}
-            className="w-full py-2.5 px-3 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white font-semibold text-xs border border-slate-700/60 transition-colors text-center cursor-pointer"
+            className="w-full py-2 px-3 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white font-semibold text-xs border border-slate-700/60 transition-colors text-center cursor-pointer"
           >
             Continue in Browser
           </button>

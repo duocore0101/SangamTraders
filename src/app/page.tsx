@@ -33,7 +33,13 @@ export default function StartupProfileSelectionPage() {
         <div className="flex items-center gap-2 sm:gap-3 text-xs text-slate-400">
           <button
             onClick={() => {
-              sessionStorage.removeItem('sangam_pwa_dismissed_session');
+              try {
+                sessionStorage.removeItem('sangam_pwa_dismissed');
+                sessionStorage.removeItem('sangam_pwa_dismissed_session');
+                localStorage.removeItem('sangam_pwa_installed');
+              } catch (e) {
+                console.error(e);
+              }
               window.dispatchEvent(new CustomEvent('open-pwa-install'));
             }}
             className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-500 hover:to-emerald-500 text-white shadow-md shadow-blue-500/20 transition-all cursor-pointer active:scale-95"
