@@ -4,7 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { STORE_ACCOUNTS } from '@/types';
-import { Sparkles, ShieldCheck, ArrowRight, Store, Phone } from 'lucide-react';
+import { Sparkles, ShieldCheck, ArrowRight, Store, Phone, Download } from 'lucide-react';
 
 export default function StartupProfileSelectionPage() {
   return (
@@ -30,9 +30,22 @@ export default function StartupProfileSelectionPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 text-xs text-slate-400">
-          <ShieldCheck className="w-4 h-4 text-emerald-400" />
-          <span className="hidden sm:inline font-medium">Secured Owner Login</span>
+        <div className="flex items-center gap-2 sm:gap-3 text-xs text-slate-400">
+          <button
+            onClick={() => {
+              sessionStorage.removeItem('sangam_pwa_dismissed_session');
+              window.dispatchEvent(new CustomEvent('open-pwa-install'));
+            }}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-500 hover:to-emerald-500 text-white shadow-md shadow-blue-500/20 transition-all cursor-pointer active:scale-95"
+            title="Download & Install Sangam POS App"
+          >
+            <Download className="w-3.5 h-3.5 animate-bounce" />
+            <span>Install App</span>
+          </button>
+          <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-400">
+            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            <span className="font-medium">Secured Owner Login</span>
+          </div>
         </div>
       </header>
 
