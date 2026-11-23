@@ -20,8 +20,11 @@ import {
   ShoppingCart, 
   Truck, 
   Clock,
-  ArrowRight
+  ArrowRight,
+  Trash2,
+  X
 } from 'lucide-react';
+import { toast } from 'sonner';
 import Link from 'next/link';
 import {
   ResponsiveContainer,
@@ -42,6 +45,10 @@ const CATEGORY_COLORS = ['#2563EB', '#10B981', '#F59E0B', '#6366F1', '#EC4899', 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [dateFilter, setDateFilter] = useState<'today' | '7days' | 'month'>('7days');
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetBothStores, setResetBothStores] = useState(true);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const activeStore = storeService.getActiveStore();
 
   useEffect(() => {
     setStats(storeService.getDashboardStats());
@@ -50,6 +57,21 @@ export default function DashboardPage() {
     });
     return unsubscribe;
   }, []);
+
+  const handleConfirmReset = async () => {
+    try {
+      setIsDeleting(true);
+      await storeService.resetAllStoreData(activeStore.id, resetBothStores);
+      setStats(storeService.getDashboardStats());
+      toast.success('All invoices, products, and reports have been permanently deleted and reset to zero.');
+      setShowResetModal(false);
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to reset data');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   if (!stats) return null;
 
@@ -99,6 +121,16 @@ export default function DashboardPage() {
               Create Invoice
             </Button>
           </Link>
+
+          <Button
+            size="sm"
+            variant="danger"
+            onClick={() => setShowResetModal(true)}
+            leftIcon={<Trash2 className="w-3.5 h-3.5" />}
+            className="border border-rose-300 bg-rose-50 hover:bg-rose-600 hover:text-white text-rose-700 transition-all shadow-2xs font-bold"
+          >
+            Reset All Data
+          </Button>
         </div>
       </div>
 
@@ -485,6 +517,103 @@ export default function DashboardPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Confirmation Modal for Reset All Software Data */}
+      {showResetModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/75 backdrop-blur-sm animate-in fade-in duration-200">
+          <div 
+            className="relative w-full max-w-lg bg-white rounded-3xl p-6 sm:p-7 shadow-2xl border border-slate-200 text-slate-900 overflow-hidden animate-in zoom-in-95 duration-200"
+            role="dialog"
+            aria-modal="true"
+          >
+            {/* Close Button */}
+            <button
+              onClick={() => setShowResetModal(false)}
+              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* Warning Icon & Heading */}
+            <div className="flex flex-col items-center text-center">
+              <div className="w-14 h-14 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mb-3.5 shadow-inner">
+                <AlertTriangle className="w-7 h-7 text-rose-600 animate-pulse" />
+              </div>
+
+              <h3 className="text-xl font-black text-slate-900 tracking-tight">
+                Reset All Software Data?
+              </h3>
+              <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-sm">
+                This will permanently delete all records and reset every value, invoice, and report to zero.
+              </p>
+            </div>
+
+            {/* Red Alert Callout */}
+            <div className="mt-4 p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 text-xs space-y-2">
+              <div className="font-bold flex items-center gap-1.5 text-rose-700">
+                <Trash2 className="w-4 h-4 shrink-0" />
+                <span>The following will be completely erased:</span>
+              </div>
+              <ul className="grid grid-cols-2 gap-1.5 text-[11px] text-rose-800 font-medium pl-1">
+                <li>• All Invoices &amp; Bills (₹0.00)</li>
+                <li>• All Catalog Products</li>
+                <li>• All Categories &amp; Units</li>
+                <li>• All Stock Movements</li>
+                <li>• All Customer Balances</li>
+                <li>• All Supplier Payables</li>
+                <li>• Sales Trend (Reset to 0)</li>
+                <li>• All Reports &amp; Ledger Logs</li>
+              </ul>
+            </div>
+
+            {/* Option to Reset Both Stores */}
+            <div className="mt-4 p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={resetBothStores}
+                  onChange={(e) => setResetBothStores(e.target.checked)}
+                  className="w-4 h-4 mt-0.5 rounded text-rose-600 focus:ring-rose-500 border-slate-300 cursor-pointer"
+                />
+                <div>
+                  <span className="font-bold text-slate-800">
+                    Delete data for both store logins
+                  </span>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Wipes data for both <strong className="text-slate-700">Sangam Traders</strong> and <strong className="text-slate-700">Sangam Sales and Automobiles</strong> across PC and mobile.
+                  </p>
+                </div>
+              </label>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="mt-5 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setShowResetModal(false)}
+                disabled={isDeleting}
+                className="flex-1 py-2.5 px-4 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold text-xs transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={handleConfirmReset}
+                disabled={isDeleting}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md shadow-rose-600/30 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 active:scale-95"
+              >
+                {isDeleting ? (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Trash2 className="w-4 h-4" />
+                )}
+                <span>{isDeleting ? 'Deleting Everything...' : 'Delete All Data'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppShell>
   );
 }

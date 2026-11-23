@@ -168,9 +168,16 @@ class StoreService {
         return defaultVal;
       };
 
-      const defaultProducts = storeId === 'sangam-traders' ? INITIAL_PRODUCTS_TRADERS : INITIAL_PRODUCTS_SALES;
-      const defaultInvoices = storeId === 'sangam-traders' ? INITIAL_INVOICES_TRADERS : INITIAL_INVOICES_SALES;
+      const isReset = localStorage.getItem(`${STORAGE_PREFIX}${storeId}_is_reset`) === 'true';
+      const defaultProducts = isReset ? [] : (storeId === 'sangam-traders' ? INITIAL_PRODUCTS_TRADERS : INITIAL_PRODUCTS_SALES);
+      const defaultInvoices = isReset ? [] : (storeId === 'sangam-traders' ? INITIAL_INVOICES_TRADERS : INITIAL_INVOICES_SALES);
       const defaultSettings = storeId === 'sangam-traders' ? INITIAL_SETTINGS_TRADERS : INITIAL_SETTINGS_SALES;
+      const defaultCategories = isReset ? [] : INITIAL_CATEGORIES;
+      const defaultCustomers = isReset ? [] : INITIAL_CUSTOMERS;
+      const defaultSuppliers = isReset ? [] : INITIAL_SUPPLIERS;
+      const defaultPurchases = isReset ? [] : INITIAL_PURCHASES;
+      const defaultPayments = isReset ? [] : INITIAL_PAYMENTS;
+      const defaultMovements = isReset ? [] : INITIAL_STOCK_MOVEMENTS;
 
       this.settings = load('settings', {
         ...defaultSettings,
@@ -187,15 +194,15 @@ class StoreService {
         invoiceFooter: `Thank you for choosing ${activeStore.name}! Please visit again.`,
       });
 
-      this.categories = load('categories', INITIAL_CATEGORIES);
+      this.categories = load('categories', defaultCategories);
       this.units = load('units', INITIAL_UNITS);
       this.products = load('products', defaultProducts);
-      this.customers = load('customers', INITIAL_CUSTOMERS);
-      this.suppliers = load('suppliers', INITIAL_SUPPLIERS);
+      this.customers = load('customers', defaultCustomers);
+      this.suppliers = load('suppliers', defaultSuppliers);
       this.invoices = load('invoices', defaultInvoices);
-      this.purchases = load('purchases', INITIAL_PURCHASES);
-      this.payments = load('payments', INITIAL_PAYMENTS);
-      this.stockMovements = load('movements', INITIAL_STOCK_MOVEMENTS);
+      this.purchases = load('purchases', defaultPurchases);
+      this.payments = load('payments', defaultPayments);
+      this.stockMovements = load('movements', defaultMovements);
       this.stockAdjustments = load('adjustments', []);
       this.currentUser = {
         ...INITIAL_PROFILES[0],
@@ -234,6 +241,7 @@ class StoreService {
   private persist(key: string, data: unknown) {
     if (typeof window === 'undefined') return;
     try {
+      localStorage.removeItem(`${STORAGE_PREFIX}${this.activeStoreId}_is_reset`);
       localStorage.setItem(`${STORAGE_PREFIX}${this.activeStoreId}_${key}`, JSON.stringify(data));
       localStorage.setItem(`${STORAGE_PREFIX}${key}`, JSON.stringify(data));
     } catch {}
@@ -332,6 +340,24 @@ class StoreService {
 
       if (data && data.length > 0 && data[0].details) {
         const remote = data[0].details as any;
+
+        // If cloud snapshot was reset, reflect reset state across all syncing devices
+        if (remote.isReset === true) {
+          this.invoices = [];
+          this.products = [];
+          this.categories = [];
+          this.customers = [];
+          this.suppliers = [];
+          this.purchases = [];
+          this.payments = [];
+          this.stockMovements = [];
+          this.stockAdjustments = [];
+          localStorage.setItem(`${STORAGE_PREFIX}${storeId}_is_reset`, 'true');
+          this.persistLocal(storeId);
+          this.notify();
+          this.notifySyncStatus('synced');
+          return true;
+        }
 
         // Merge invoices by unique invoiceNumber to preserve bills across devices
         if (remote.invoices && Array.isArray(remote.invoices)) {
@@ -448,6 +474,98 @@ class StoreService {
 
     this.loadStoreData(storeId);
     return store;
+  }
+
+  // --- Reset All Data from the Software ---
+  async resetAllStoreData(storeId: StoreId = this.activeStoreId, resetBoth: boolean = true): Promise<void> {
+    const storesToReset: StoreId[] = resetBoth 
+      ? ['sangam-traders', 'sangam-sales-automobiles'] 
+      : [storeId];
+
+    for (const sid of storesToReset) {
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(`${STORAGE_PREFIX}${sid}_is_reset`, 'true');
+          localStorage.setItem(`${STORAGE_PREFIX}${sid}_invoices`, JSON.stringify([]));
+          localStorage.setItem(`${STORAGE_PREFIX}${sid}_products`, JSON.stringify([]));
+          localStorage.setItem(`${STORAGE_PREFIX}${sid}_categories`, JSON.stringify([]));
+          localStorage.setItem(`${STORAGE_PREFIX}${sid}_customers`, JSON.stringify([]));
+          localStorage.setItem(`${STORAGE_PREFIX}${sid}_suppliers`, JSON.stringify([]));
+          localStorage.setItem(`${STORAGE_PREFIX}${sid}_purchases`, JSON.stringify([]));
+          localStorage.setItem(`${STORAGE_PREFIX}${sid}_payments`, JSON.stringify([]));
+          localStorage.setItem(`${STORAGE_PREFIX}${sid}_movements`, JSON.stringify([]));
+          localStorage.setItem(`${STORAGE_PREFIX}${sid}_adjustments`, JSON.stringify([]));
+          localStorage.removeItem(`${STORAGE_PREFIX}invoices`);
+          localStorage.removeItem(`${STORAGE_PREFIX}products`);
+          localStorage.removeItem(`${STORAGE_PREFIX}customers`);
+        } catch {}
+      }
+
+      // If resetting the currently loaded store in memory:
+      if (sid === this.activeStoreId) {
+        this.invoices = [];
+        this.products = [];
+        this.categories = [];
+        this.customers = [];
+        this.suppliers = [];
+        this.purchases = [];
+        this.payments = [];
+        this.stockMovements = [];
+        this.stockAdjustments = [];
+        this.persistLocal(sid);
+      }
+
+      // Upload reset snapshot to Supabase Cloud so sync reflects zero data across devices
+      if (isSupabaseConfigured && supabase) {
+        try {
+          const now = new Date().toISOString();
+          const snapshot = {
+            storeId: sid,
+            settings: this.settings,
+            products: [],
+            invoices: [],
+            customers: [],
+            suppliers: [],
+            categories: [],
+            units: this.units,
+            purchases: [],
+            payments: [],
+            stockMovements: [],
+            stockAdjustments: [],
+            updatedAt: now,
+            isReset: true,
+          };
+
+          const { data: existing } = await supabase
+            .from('audit_logs')
+            .select('id')
+            .eq('entity', 'store_sync')
+            .eq('action', sid)
+            .order('created_at', { ascending: false })
+            .limit(1);
+
+          if (existing && existing.length > 0) {
+            await supabase
+              .from('audit_logs')
+              .update({ details: snapshot })
+              .eq('id', existing[0].id);
+          } else {
+            await supabase
+              .from('audit_logs')
+              .insert({
+                entity: 'store_sync',
+                action: sid,
+                details: snapshot,
+              });
+          }
+        } catch (err) {
+          console.error('Failed to sync reset to Supabase:', err);
+        }
+      }
+    }
+
+    this.notify();
+    this.notifySyncStatus('synced');
   }
 
   loginWithMobile(storeId: StoreId, mobile: string, password: string): StoreAccount {
