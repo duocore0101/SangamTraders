@@ -179,8 +179,10 @@ class StoreService {
       const defaultPayments = isReset ? [] : INITIAL_PAYMENTS;
       const defaultMovements = isReset ? [] : INITIAL_STOCK_MOVEMENTS;
 
-      this.settings = load('settings', {
+      const loadedSettings = load('settings', defaultSettings);
+      this.settings = {
         ...defaultSettings,
+        ...loadedSettings,
         shopName: activeStore.name.toUpperCase(),
         tagline: activeStore.tagline,
         logoUrl: activeStore.logoUrl,
@@ -192,7 +194,7 @@ class StoreService {
         pincode: '412409',
         invoicePrefix: activeStore.invoicePrefix,
         invoiceFooter: `Thank you for choosing ${activeStore.name}! Please visit again.`,
-      });
+      };
 
       this.categories = load('categories', defaultCategories);
       this.units = load('units', INITIAL_UNITS);
@@ -416,9 +418,12 @@ class StoreService {
           this.stockAdjustments = remote.stockAdjustments;
         }
         if (remote.settings && typeof remote.settings === 'object') {
+          const activeStore = STORE_ACCOUNTS.find((s) => s.id === storeId) || STORE_ACCOUNTS[0];
           this.settings = {
             ...this.settings,
             ...remote.settings,
+            shopName: activeStore.name.toUpperCase(),
+            invoiceFooter: `Thank you for choosing ${activeStore.name}! Please visit again.`,
             address: 'BankarPhata, Otur, Maharashtra',
             gstin: '27ANPPG4334F1Z0',
             state: 'Maharashtra',

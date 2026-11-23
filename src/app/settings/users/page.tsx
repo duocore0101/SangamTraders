@@ -94,7 +94,7 @@ export default function UserSettingsPage() {
             <div>
               <h3>ADMINISTRATOR ACCESS & PRIVILEGES</h3>
               <p className="text-xs text-slate-500 font-normal">
-                Single unified administrative security model for Sangam Sales and Automobiles & Sangam Traders
+                Single unified administrative security model for Sangam Sales and Sangam Automobiles & Sangam Traders
               </p>
             </div>
           </div>

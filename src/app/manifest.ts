@@ -4,7 +4,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: 'Sangam Enterprises - POS & ERP',
     short_name: 'Sangam POS',
-    description: 'Fast GST Billing, Stock & Ledger Management for Sangam Sales & Automobiles and Sangam Traders',
+    description: 'Fast GST Billing, Stock & Ledger Management for Sangam Sales and Sangam Automobiles and Sangam Traders',
     start_url: '/',
     scope: '/',
     id: '/',
@@ -65,9 +65,9 @@ export default function manifest(): MetadataRoute.Manifest {
         icons: [{ src: '/icons/icon-192x192.png', sizes: '192x192' }],
       },
       {
-        name: 'Sangam Sales Login',
-        short_name: 'Sales',
-        description: 'Log into Sangam Sales & Automobiles',
+        name: 'Sangam Sales and Sangam Automobiles Login',
+        short_name: 'Sales & Auto',
+        description: 'Log into Sangam Sales and Sangam Automobiles',
         url: '/login?store=sangam-sales-automobiles',
         icons: [{ src: '/icons/icon-192x192.png', sizes: '192x192' }],
       },

@@ -23,8 +23,8 @@ export interface StoreAccount {
 export const STORE_ACCOUNTS: StoreAccount[] = [
   {
     id: 'sangam-sales-automobiles',
-    name: 'Sangam Sales and Automobiles',
-    shortName: 'Sangam Sales & Auto',
+    name: 'Sangam Sales and Sangam Automobiles',
+    shortName: 'Sangam Sales & Sangam Auto',
     tagline: 'Hardware, Industrial Tools & Automobile Spare Parts',
     logoUrl: '/images/sangam_sales_automobiles_logo_v2.png',
     ownerName: 'MR. Rajendra Gaikwad',

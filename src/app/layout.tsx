@@ -12,7 +12,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Sangam Sales and Automobiles & Sangam Traders – Management System",
+  title: "Sangam Sales and Sangam Automobiles & Sangam Traders – Management System",
   description: "Hardware, Automobile Spares & Building Materials Billing, Inventory, and Accounting System by Duocore Software",
   manifest: "/manifest.json",
   appleWebApp: {

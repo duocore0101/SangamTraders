@@ -44,7 +44,7 @@ export function generateInvoicePdf(invoice: Invoice, settings: BusinessSettings,
   }
 
   // Business Name (Sized safely to never collide with the right heading)
-  const shopName = settings.shopName || 'SANGAM SALES AND AUTOMOBILES';
+  const shopName = settings.shopName || 'SANGAM SALES AND SANGAM AUTOMOBILES';
   let shopFontSize = 12;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(shopFontSize);
@@ -369,7 +369,7 @@ export function generateInvoicePdf(invoice: Invoice, settings: BusinessSettings,
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(100, 116, 139);
-  doc.text(settings.invoiceFooter || 'Thank you for choosing Sangam Sales and Automobiles!', 14, footerY);
+  doc.text(settings.invoiceFooter || 'Thank you for choosing Sangam Sales and Sangam Automobiles!', 14, footerY);
 
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 23, 42);

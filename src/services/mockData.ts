@@ -25,7 +25,7 @@ export const INITIAL_PROFILES: UserProfile[] = [
 
 export const INITIAL_SETTINGS_SALES: BusinessSettings = {
   id: 'bs-ssa',
-  shopName: 'SANGAM SALES AND AUTOMOBILES',
+  shopName: 'SANGAM SALES AND SANGAM AUTOMOBILES',
   tagline: 'Hardware, Industrial Tools & Automobile Spare Parts',
   logoUrl: '/images/sangam_sales_automobiles_logo_v2.png',
   address: 'BankarPhata, Otur, Maharashtra',
@@ -38,7 +38,7 @@ export const INITIAL_SETTINGS_SALES: BusinessSettings = {
   nextInvoiceNumber: 1005,
   defaultGstRate: 18,
   defaultDiscountRate: 0,
-  invoiceFooter: 'Thank you for choosing Sangam Sales and Automobiles! Please visit again.',
+  invoiceFooter: 'Thank you for choosing Sangam Sales and Sangam Automobiles! Please visit again.',
   termsAndConditions: '1. Goods once sold can only be replaced within 7 days in original condition with bill.\n2. Electrical & power tools covered under respective brand warranties.\n3. All disputes subject to local jurisdiction.',
   defaultPaymentMethod: 'cash',
   lowStockNotificationThreshold: 5,

@@ -116,7 +116,7 @@ export default function BillingSettingsPage() {
                 <Input
                   value={settings.invoiceFooter}
                   onChange={(e) => setSettings({ ...settings, invoiceFooter: e.target.value })}
-                  placeholder="Thank you for visiting Sangam Sales and Automobiles!"
+                  placeholder="Thank you for visiting Sangam Sales and Sangam Automobiles!"
                 />
               </div>
 

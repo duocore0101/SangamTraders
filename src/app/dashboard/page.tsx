@@ -580,7 +580,7 @@ export default function DashboardPage() {
                     Delete data for both store logins
                   </span>
                   <p className="text-[11px] text-slate-500 mt-0.5">
-                    Wipes data for both <strong className="text-slate-700">Sangam Traders</strong> and <strong className="text-slate-700">Sangam Sales and Automobiles</strong> across PC and mobile.
+                    Wipes data for both <strong className="text-slate-700">Sangam Traders</strong> and <strong className="text-slate-700">Sangam Sales and Sangam Automobiles</strong> across PC and mobile.
                   </p>
                 </div>
               </label>
