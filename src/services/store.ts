@@ -1311,21 +1311,150 @@ class StoreService {
   ): Purchase {
     const purchaseNum = `PO-${new Date().getFullYear()}-${(this.purchases.length + 1).toString().padStart(3, '0')}`;
     const now = new Date().toISOString();
-
     const newPurchaseId = `pur-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+    // Auto-create or update products entered in this purchase bill
+    let productsUpdated = false;
+    const processedItems = (purchaseData.items || []).map((item, idx) => {
+      // 1. Check if product already exists by ID, name, or SKU
+      let product = item.productId
+        ? this.products.find((p) => p.id === item.productId)
+        : undefined;
+
+      if (!product && item.productName) {
+        const cleanName = item.productName.trim().toLowerCase();
+        product = this.products.find(
+          (p) =>
+            p.name.trim().toLowerCase() === cleanName ||
+            (item.sku && p.sku.toLowerCase() === item.sku.trim().toLowerCase())
+        );
+      }
+
+      if (product) {
+        // Update product prices and metadata from this purchase
+        product.purchasePrice = item.purchaseRate;
+        if (item.sellingPrice && item.sellingPrice > 0) {
+          product.sellingPrice = item.sellingPrice;
+        }
+        if (item.hsnCode && !product.hsnCode) {
+          product.hsnCode = item.hsnCode;
+        }
+        if (item.partNo && !product.partNo) {
+          product.partNo = item.partNo;
+        }
+        product.updatedAt = now;
+        productsUpdated = true;
+
+        return {
+          ...item,
+          id: `pi-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
+          purchaseId: newPurchaseId,
+          productId: product.id,
+          sku: product.sku,
+          productName: product.name,
+        };
+      } else {
+        // Auto-create brand new product in store catalog!
+        const storePrefix = this.activeStoreId === 'sangam-traders' ? 'ST' : 'SSA';
+        const generatedSku =
+          item.sku && !this.products.some((p) => p.sku.toLowerCase() === item.sku.toLowerCase())
+            ? item.sku
+            : `${storePrefix}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+        const matchedUnit =
+          this.units.find(
+            (u) =>
+              u.symbol.toLowerCase() === (item.unit || '').trim().toLowerCase() ||
+              u.name.toLowerCase() === (item.unit || '').trim().toLowerCase()
+          ) || this.units[0];
+
+        const defaultCategory = this.categories[0];
+        const sellingPrice =
+          item.sellingPrice && item.sellingPrice > 0
+            ? item.sellingPrice
+            : +(item.purchaseRate * 1.25).toFixed(2);
+
+        const newProduct: Product = {
+          id: `prod-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          name: item.productName.trim(),
+          sku: generatedSku,
+          hsnCode: item.hsnCode?.trim() || undefined,
+          partNo: item.partNo?.trim() || undefined,
+          categoryId: defaultCategory?.id || 'cat-hardware',
+          categoryName: defaultCategory?.name || 'General Hardware',
+          purchasePrice: item.purchaseRate,
+          sellingPrice,
+          gstRate: item.taxRate ?? 18,
+          unitId: matchedUnit?.id || 'unit-pc',
+          unitSymbol: item.unit || matchedUnit?.symbol || 'pc',
+          currentStock: 0, // stock will be received below if status is received
+          minStockLevel: 5,
+          supplierId: purchaseData.supplierId,
+          supplierName: purchaseData.supplierName,
+          createdAt: now,
+          updatedAt: now,
+          stockStatus: 'out_of_stock',
+        };
+
+        this.products.unshift(newProduct);
+        productsUpdated = true;
+
+        return {
+          ...item,
+          id: `pi-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
+          purchaseId: newPurchaseId,
+          productId: newProduct.id,
+          sku: newProduct.sku,
+          productName: newProduct.name,
+          isNewProduct: true,
+        };
+      }
+    });
+
+    if (productsUpdated) {
+      this.persist('products', this.products);
+    }
+
+    // Auto-calculate CGST / SGST if not explicitly provided
+    const isInterState = Boolean(
+      purchaseData.supplierState &&
+      purchaseData.supplierState.trim().toLowerCase() !== 'maharashtra'
+    );
+    let cgstAmount = purchaseData.cgstAmount;
+    let sgstAmount = purchaseData.sgstAmount;
+    let igstAmount = purchaseData.igstAmount;
+
+    if (cgstAmount === undefined && sgstAmount === undefined && igstAmount === undefined) {
+      if (isInterState) {
+        igstAmount = purchaseData.taxAmount;
+        cgstAmount = 0;
+        sgstAmount = 0;
+      } else {
+        cgstAmount = +(purchaseData.taxAmount / 2).toFixed(2);
+        sgstAmount = +(purchaseData.taxAmount / 2).toFixed(2);
+        igstAmount = 0;
+      }
+    }
+
+    const unroundedTotal = +(purchaseData.subtotal - (purchaseData.discountAmount || 0) + purchaseData.taxAmount).toFixed(2);
+    const roundOff =
+      purchaseData.roundOff !== undefined
+        ? purchaseData.roundOff
+        : +(purchaseData.totalAmount - unroundedTotal).toFixed(2);
+
     const newPurchase: Purchase = {
       ...purchaseData,
       id: newPurchaseId,
       purchaseNumber: purchaseNum,
+      cgstAmount,
+      sgstAmount,
+      igstAmount,
+      roundOff,
       createdBy: this.currentUser.id,
       createdByName: this.currentUser.fullName,
       createdAt: now,
       updatedAt: now,
-      items: purchaseData.items?.map((item, idx) => ({
-        ...item,
-        id: `pi-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
-        purchaseId: newPurchaseId,
-      })),
+      items: processedItems,
     };
 
     this.purchases.unshift(newPurchase);

@@ -133,3 +133,65 @@ export function getStockStatus(currentStock: number, minStockLevel: number = 5):
   return 'in_stock';
 }
 
+const ONES = [
+  '', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
+  'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen',
+  'Seventeen', 'Eighteen', 'Nineteen',
+];
+
+const TENS = [
+  '', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety',
+];
+
+function convertLessThanOneThousand(num: number): string {
+  if (num === 0) return '';
+  if (num < 20) return ONES[num];
+  if (num < 100) {
+    const rem = num % 10;
+    return TENS[Math.floor(num / 10)] + (rem > 0 ? ` ${ONES[rem]}` : '');
+  }
+  const rem = num % 100;
+  return `${ONES[Math.floor(num / 100)]} Hundred${rem > 0 ? ` ${convertLessThanOneThousand(rem)}` : ''}`;
+}
+
+export function numberToWords(amount: number | string | undefined | null): string {
+  const num = typeof amount === 'string' ? parseFloat(amount) : (amount ?? 0);
+  if (isNaN(num) || num === 0) return 'INR Zero Only';
+
+  const absolute = Math.abs(num);
+  let rupees = Math.floor(absolute);
+  const paise = Math.round((absolute - rupees) * 100);
+
+  const parts: string[] = [];
+
+  const crores = Math.floor(rupees / 10000000);
+  rupees %= 10000000;
+  if (crores > 0) {
+    parts.push(`${convertLessThanOneThousand(crores)} Crore`);
+  }
+
+  const lakhs = Math.floor(rupees / 100000);
+  rupees %= 100000;
+  if (lakhs > 0) {
+    parts.push(`${convertLessThanOneThousand(lakhs)} Lakh`);
+  }
+
+  const thousands = Math.floor(rupees / 1000);
+  rupees %= 1000;
+  if (thousands > 0) {
+    parts.push(`${convertLessThanOneThousand(thousands)} Thousand`);
+  }
+
+  if (rupees > 0) {
+    parts.push(convertLessThanOneThousand(rupees));
+  }
+
+  let words = parts.join(' ').trim();
+  if (!words) words = 'Zero';
+
+  if (paise > 0) {
+    return `INR ${words} and ${convertLessThanOneThousand(paise)} Paise Only`;
+  }
+  return `INR ${words} Only`;
+}
+

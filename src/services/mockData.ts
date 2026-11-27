@@ -152,6 +152,26 @@ export const INITIAL_CUSTOMERS: Customer[] = [
 
 export const INITIAL_SUPPLIERS: Supplier[] = [
   {
+    id: 'sup-aarti',
+    name: 'AARTI SALES AGENCIES',
+    contactPerson: 'Sales Department',
+    mobile: '9822620910',
+    email: 'aartisales@gmail.com',
+    address: '2, Gangotri App, Indrakund, Panchvati, Nashik 422003',
+    gstin: '27ABTPM0336P1Z0',
+    state: 'Maharashtra',
+    stateCode: '27',
+    bankDetails: {
+      bankName: 'BANK OF MAHARASHTRA',
+      accountNo: '20118504756',
+      ifscCode: 'MAHB0000332',
+      branch: 'PANCHVATI',
+    },
+    totalPurchased: 36158,
+    outstandingBalance: 0,
+    createdAt: '2026-01-01T10:00:00Z',
+  },
+  {
     id: 'sup-01',
     name: 'Tata Steel Distributors (North)',
     contactPerson: 'Ashok Gupta',

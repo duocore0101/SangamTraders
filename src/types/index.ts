@@ -114,6 +114,8 @@ export interface Product {
   name: string;
   sku: string;
   barcode?: string;
+  hsnCode?: string;
+  partNo?: string;
   categoryId: string;
   categoryName?: string;
   subcategory?: string;
@@ -157,6 +159,13 @@ export interface Supplier {
   address?: string;
   gstin?: string;
   state?: string;
+  stateCode?: string;
+  bankDetails?: {
+    bankName?: string;
+    accountNo?: string;
+    ifscCode?: string;
+    branch?: string;
+  };
   notes?: string;
   totalPurchased?: number;
   outstandingBalance?: number;
@@ -232,12 +241,18 @@ export interface PurchaseItem {
   productId: string;
   productName: string;
   sku: string;
+  hsnCode?: string;
+  partNo?: string;
   quantity: number;
   unit: string;
   purchaseRate: number;
+  discountPercent?: number;
+  discountAmount?: number;
   taxRate: number;
   taxAmount: number;
   totalAmount: number;
+  sellingPrice?: number;
+  isNewProduct?: boolean;
 }
 
 export interface Purchase {
@@ -246,10 +261,24 @@ export interface Purchase {
   purchaseDate: string;
   supplierId: string;
   supplierName: string;
+  supplierAddress?: string;
+  supplierGstin?: string;
+  supplierMobile?: string;
+  supplierState?: string;
+  supplierStateCode?: string;
   supplierInvoiceNumber?: string;
+  supplierRef?: string;
+  buyersOrderNo?: string;
+  otherReferences?: string;
+  termsOfDelivery?: string;
+  paymentModeTerms?: string;
   subtotal: number;
   taxAmount: number;
+  cgstAmount?: number;
+  sgstAmount?: number;
+  igstAmount?: number;
   discountAmount: number;
+  roundOff?: number;
   totalAmount: number;
   amountPaid: number;
   balanceDue: number;
@@ -257,6 +286,12 @@ export interface Purchase {
   paymentStatus: PaymentStatus;
   status: PurchaseStatus;
   notes?: string;
+  bankDetails?: {
+    bankName?: string;
+    accountNo?: string;
+    ifscCode?: string;
+    branch?: string;
+  };
   createdBy: string;
   createdByName?: string;
   createdAt: string;
