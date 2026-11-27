@@ -213,6 +213,9 @@ class StoreService {
         email: activeStore.email,
       };
 
+      // Automatically sync stock for products added through received purchases
+      this.reconcilePurchaseStock();
+
       this.persistLocal(storeId);
       this.notify();
 
@@ -700,8 +703,68 @@ class StoreService {
     return newUnit;
   }
 
+  // Automatically reconciles stock for products entered via received purchase bills
+  reconcilePurchaseStock(): boolean {
+    let changed = false;
+    if (!this.purchases || !this.products) return false;
+
+    for (const pur of this.purchases) {
+      if (pur.status === 'received' && pur.items) {
+        for (const item of pur.items) {
+          const qty = Number(item.quantity) || 0;
+          if (qty <= 0) continue;
+
+          // Find product by id, sku, or name
+          let product = item.productId ? this.products.find((p) => p.id === item.productId) : undefined;
+          if (!product && item.sku) {
+            product = this.products.find((p) => p.sku.toLowerCase() === item.sku.toLowerCase());
+          }
+          if (!product && item.productName) {
+            const clean = item.productName.trim().toLowerCase();
+            product = this.products.find((p) => p.name.trim().toLowerCase() === clean);
+          }
+
+          if (product && product.currentStock === 0) {
+            product.currentStock = qty;
+            product.stockStatus = getStockStatus(qty, product.minStockLevel);
+            if (item.unit) {
+              product.unitSymbol = item.unit;
+            }
+            if (item.hsnCode && !product.hsnCode) {
+              product.hsnCode = item.hsnCode;
+            }
+            if (item.partNo && !product.partNo) {
+              product.partNo = item.partNo;
+            }
+            product.updatedAt = new Date().toISOString();
+            changed = true;
+
+            this.recordStockMovement({
+              productId: product.id,
+              productName: product.name,
+              sku: product.sku,
+              transactionType: 'purchase',
+              quantityChange: qty,
+              previousStock: 0,
+              newStock: qty,
+              referenceId: pur.id,
+              referenceNumber: pur.purchaseNumber,
+              reason: `Stock Sync from Received Bill ${pur.purchaseNumber}`,
+            });
+          }
+        }
+      }
+    }
+
+    if (changed) {
+      this.persistLocal(this.activeStoreId);
+    }
+    return changed;
+  }
+
   // --- Products ---
   getProducts(): Product[] {
+    this.reconcilePurchaseStock();
     return this.products.map((p) => {
       const cat = this.categories.find((c) => c.id === p.categoryId);
       const unit = this.units.find((u) => u.id === p.unitId);
@@ -709,7 +772,7 @@ class StoreService {
       return {
         ...p,
         categoryName: cat ? cat.name : p.categoryName || 'General',
-        unitSymbol: unit ? unit.symbol : p.unitSymbol || 'pc',
+        unitSymbol: p.unitSymbol || (unit ? unit.symbol : 'pc'),
         supplierName: sup ? sup.name : p.supplierName,
         stockStatus: getStockStatus(p.currentStock, p.minStockLevel),
       };
@@ -1342,6 +1405,28 @@ class StoreService {
         if (item.partNo && !product.partNo) {
           product.partNo = item.partNo;
         }
+        const isReceived = purchaseData.status === 'received';
+        const itemQty = Number(item.quantity) || 1;
+
+        if (isReceived) {
+          const prevStock = product.currentStock;
+          const newStock = +(prevStock + itemQty).toFixed(3);
+          product.currentStock = newStock;
+          product.stockStatus = getStockStatus(newStock, product.minStockLevel);
+          this.recordStockMovement({
+            productId: product.id,
+            productName: product.name,
+            sku: product.sku,
+            transactionType: 'purchase',
+            quantityChange: itemQty,
+            previousStock: prevStock,
+            newStock,
+            referenceId: newPurchaseId,
+            referenceNumber: purchaseNum,
+            reason: `Purchase ${purchaseNum} from ${purchaseData.supplierName}`,
+          });
+        }
+
         product.updatedAt = now;
         productsUpdated = true;
 
@@ -1374,6 +1459,10 @@ class StoreService {
             ? item.sellingPrice
             : +(item.purchaseRate * 1.25).toFixed(2);
 
+        const isReceived = purchaseData.status === 'received';
+        const initialStock = isReceived ? Number(item.quantity) || 0 : 0;
+        const assignedUnitSymbol = item.unit || matchedUnit?.symbol || 'pc';
+
         const newProduct: Product = {
           id: `prod-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           name: item.productName.trim(),
@@ -1386,18 +1475,33 @@ class StoreService {
           sellingPrice,
           gstRate: item.taxRate ?? 18,
           unitId: matchedUnit?.id || 'unit-pc',
-          unitSymbol: item.unit || matchedUnit?.symbol || 'pc',
-          currentStock: 0, // stock will be received below if status is received
+          unitSymbol: assignedUnitSymbol,
+          currentStock: initialStock,
           minStockLevel: 5,
           supplierId: purchaseData.supplierId,
           supplierName: purchaseData.supplierName,
           createdAt: now,
           updatedAt: now,
-          stockStatus: 'out_of_stock',
+          stockStatus: getStockStatus(initialStock, 5),
         };
 
         this.products.unshift(newProduct);
         productsUpdated = true;
+
+        if (initialStock > 0) {
+          this.recordStockMovement({
+            productId: newProduct.id,
+            productName: newProduct.name,
+            sku: newProduct.sku,
+            transactionType: 'purchase',
+            quantityChange: initialStock,
+            previousStock: 0,
+            newStock: initialStock,
+            referenceId: newPurchaseId,
+            referenceNumber: purchaseNum,
+            reason: `Purchase ${purchaseNum} from ${purchaseData.supplierName}`,
+          });
+        }
 
         return {
           ...item,
@@ -1460,19 +1564,31 @@ class StoreService {
     this.purchases.unshift(newPurchase);
     this.persist('purchases', this.purchases);
 
-    // If created with status 'received', immediately add stock
+    // Update supplier statistics if received
     if (newPurchase.status === 'received') {
-      this.receivePurchase(newPurchase.id);
+      const supplier = this.suppliers.find((s) => s.id === newPurchase.supplierId);
+      if (supplier) {
+        supplier.totalPurchased = +(
+          (supplier.totalPurchased || 0) + newPurchase.totalAmount
+        ).toFixed(2);
+        supplier.outstandingBalance = +(
+          (supplier.outstandingBalance || 0) + newPurchase.balanceDue
+        ).toFixed(2);
+        supplier.updatedAt = now;
+        this.persist('suppliers', this.suppliers);
+      }
     }
 
     return newPurchase;
   }
 
   receivePurchase(purchaseId: string): Purchase {
-    const purchase = this.purchases.find((p) => p.id === purchaseId);
+    const purchase = this.purchases.find(
+      (p) => p.id === purchaseId || p.purchaseNumber === purchaseId
+    );
     if (!purchase) throw new Error('Purchase not found');
     if (purchase.status === 'received') {
-      throw new Error('This purchase has already been received');
+      return purchase;
     }
 
     // Add stock for each item
