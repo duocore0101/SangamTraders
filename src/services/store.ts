@@ -1519,6 +1519,62 @@ class StoreService {
     return purchase;
   }
 
+  deletePurchase(purchaseId: string, revertStock: boolean = true): boolean {
+    const purchaseIdx = this.purchases.findIndex(
+      (p) => p.id === purchaseId || p.purchaseNumber === purchaseId
+    );
+    if (purchaseIdx === -1) throw new Error('Purchase order not found');
+    const purchase = this.purchases[purchaseIdx];
+
+    // Revert stock if purchase was received
+    if (revertStock && purchase.status === 'received' && purchase.items) {
+      for (const item of purchase.items) {
+        const product = this.products.find((p) => p.id === item.productId);
+        if (product) {
+          const prevStock = product.currentStock;
+          const newStock = Math.max(0, +(prevStock - item.quantity).toFixed(3));
+          product.currentStock = newStock;
+          product.stockStatus = getStockStatus(newStock, product.minStockLevel);
+          product.updatedAt = new Date().toISOString();
+
+          this.recordStockMovement({
+            productId: product.id,
+            productName: product.name,
+            sku: product.sku,
+            transactionType: 'purchase_return',
+            quantityChange: -item.quantity,
+            previousStock: prevStock,
+            newStock,
+            referenceId: purchase.id,
+            referenceNumber: purchase.purchaseNumber,
+            reason: `Purchase Deleted / Reverted: ${purchase.purchaseNumber}`,
+          });
+        }
+      }
+      this.persist('products', this.products);
+    }
+
+    // Revert supplier balance & total purchased
+    const supplier = this.suppliers.find((s) => s.id === purchase.supplierId);
+    if (supplier) {
+      supplier.totalPurchased = Math.max(
+        0,
+        +((supplier.totalPurchased || 0) - purchase.totalAmount).toFixed(2)
+      );
+      supplier.outstandingBalance = Math.max(
+        0,
+        +((supplier.outstandingBalance || 0) - purchase.balanceDue).toFixed(2)
+      );
+      supplier.updatedAt = new Date().toISOString();
+      this.persist('suppliers', this.suppliers);
+    }
+
+    // Remove from purchases list
+    this.purchases.splice(purchaseIdx, 1);
+    this.persist('purchases', this.purchases);
+    return true;
+  }
+
   // --- Customers & Suppliers ---
   getCustomers(): Customer[] {
     return this.customers;

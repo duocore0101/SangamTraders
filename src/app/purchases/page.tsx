@@ -13,13 +13,16 @@ import { Purchase } from '@/types';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { exportToExcel } from '@/lib/excel';
 import { toast } from 'sonner';
-import { Truck, Plus, Search, FileDown, Eye, CheckCircle2 } from 'lucide-react';
+import { Truck, Plus, Search, FileDown, Eye, CheckCircle2, Trash2 } from 'lucide-react';
 import Link from 'next/link';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 
 export default function PurchasesPage() {
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [purchaseToDelete, setPurchaseToDelete] = useState<Purchase | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const loadData = () => {
     setPurchases(storeService.getPurchases());
@@ -65,6 +68,22 @@ export default function PurchasesPage() {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error receiving purchase';
       toast.error(msg);
+    }
+  };
+
+  const handleDeletePurchase = () => {
+    if (!purchaseToDelete) return;
+    setIsDeleting(true);
+    try {
+      storeService.deletePurchase(purchaseToDelete.id);
+      toast.success(`Purchase ${purchaseToDelete.purchaseNumber} deleted successfully!`);
+      setPurchaseToDelete(null);
+      loadData();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error deleting purchase';
+      toast.error(msg);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -220,6 +239,15 @@ export default function PurchasesPage() {
                             <Eye className="w-4 h-4 text-slate-600" />
                           </Button>
                         </Link>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Delete purchase bill"
+                          onClick={() => setPurchaseToDelete(p)}
+                          className="text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -229,6 +257,17 @@ export default function PurchasesPage() {
           </Table>
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        isOpen={!!purchaseToDelete}
+        onClose={() => setPurchaseToDelete(null)}
+        onConfirm={handleDeletePurchase}
+        title="Delete Purchase Bill"
+        message={`Are you sure you want to delete purchase ${purchaseToDelete?.purchaseNumber} from ${purchaseToDelete?.supplierName}? If already received, stock quantities will be safely restored.`}
+        confirmText="Delete Purchase"
+        variant="danger"
+        isLoading={isDeleting}
+      />
     </AppShell>
   );
 }

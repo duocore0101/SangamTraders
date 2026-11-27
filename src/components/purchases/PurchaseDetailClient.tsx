@@ -1,20 +1,25 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { AppShell } from '@/components/layout/AppShell';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/Table';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { storeService } from '@/services/store';
 import { Purchase, StoreAccount } from '@/types';
 import { formatCurrency, formatDate, numberToWords } from '@/lib/utils';
 import { toast } from 'sonner';
-import { ArrowLeft, Printer, CheckCircle2, Download, PackageCheck } from 'lucide-react';
+import { ArrowLeft, Printer, CheckCircle2, Download, PackageCheck, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 
 export function PurchaseDetailClient({ id }: { id: string }) {
+  const router = useRouter();
   const [purchase, setPurchase] = useState<Purchase | undefined>(undefined);
   const [activeStore, setActiveStore] = useState<StoreAccount | undefined>(undefined);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const loadData = () => {
     setPurchase(storeService.getPurchaseById(id));
@@ -63,6 +68,20 @@ export function PurchaseDetailClient({ id }: { id: string }) {
   const handleDownloadPdf = () => {
     toast.info("In the print dialog, select 'Save as PDF' under Destination to save.");
     window.print();
+  };
+
+  const handleDeletePurchase = () => {
+    if (!purchase) return;
+    setIsDeleting(true);
+    try {
+      storeService.deletePurchase(purchase.id);
+      toast.success(`Purchase ${purchase.purchaseNumber} deleted successfully!`);
+      router.push('/purchases');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error deleting purchase';
+      toast.error(msg);
+      setIsDeleting(false);
+    }
   };
 
   // Buyer details from active store
@@ -175,6 +194,16 @@ export function PurchaseDetailClient({ id }: { id: string }) {
             className="shadow-sm font-semibold"
           >
             Print Tax Invoice
+          </Button>
+
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={() => setIsDeleteConfirmOpen(true)}
+            leftIcon={<Trash2 className="w-4 h-4" />}
+            className="shadow-sm font-semibold"
+          >
+            Delete
           </Button>
         </div>
       </div>
@@ -504,6 +533,17 @@ export function PurchaseDetailClient({ id }: { id: string }) {
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        isOpen={isDeleteConfirmOpen}
+        onClose={() => setIsDeleteConfirmOpen(false)}
+        onConfirm={handleDeletePurchase}
+        title="Delete Purchase Tax Invoice"
+        message={`Are you sure you want to permanently delete purchase invoice ${purchase.supplierInvoiceNumber || purchase.purchaseNumber} from ${purchase.supplierName}? If items were already received, stock will be safely reverted.`}
+        confirmText="Delete Invoice"
+        variant="danger"
+        isLoading={isDeleting}
+      />
     </AppShell>
   );
 }
